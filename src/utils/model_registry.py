@@ -4,6 +4,7 @@ Central registry for model definitions, repositories, and metadata
 """
 
 import os
+import hashlib
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from .constants import get_all_model_files
@@ -30,7 +31,25 @@ class ModelInfo:
     variant: Optional[str] = None  # 'sharp', etc.
     sha256: Optional[str] = None  # Add this field for cached hash
 
+# --------------------------------------------------------------------
+# Persistent model paths (edit or extend if needed)
+# --------------------------------------------------------------------
+PERSISTENT_PATHS = [
+    "/runpod-volume/models/SEEDVR2",
+    "/workspace/ComfyUI/models/SEEDVR2",
+]
+
+def sha256sum(file_path):
+    """Compute SHA256 hash of a file."""
+    h = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+# --------------------------------------------------------------------
 # Model registry with metadata
+# --------------------------------------------------------------------
 MODEL_REGISTRY = {
     # 3B models
     "seedvr2_ema_3b-Q4_K_M.gguf": ModelInfo(repo="AInVFX/SeedVR2_comfyUI", size="3B", precision="Q4_K_M", sha256="e665e3909de1a8c88a69c609bca9d43ff5a134647face2ce4497640cc3597f0e"),
@@ -55,31 +74,62 @@ MODEL_REGISTRY = {
 DEFAULT_MODEL = "seedvr2_ema_3b_fp8_e4m3fn.safetensors"
 DEFAULT_VAE = "ema_vae_fp16.safetensors"
 
+# --------------------------------------------------------------------
+# Patched function: discover models from both ComfyUI and persistent dirs
+# --------------------------------------------------------------------
+def get_all_model_files_patched() -> List[str]:
+    """Discover all available model files, including persistent volumes."""
+    discovered = []
+
+    try:
+        base_files = get_all_model_files()
+        discovered.extend(base_files)
+    except Exception as e:
+        print(f"[SeedVR2] ⚠️ Failed to get default model files: {e}")
+
+    # Scan persistent paths
+    for base_dir in PERSISTENT_PATHS:
+        if not os.path.exists(base_dir):
+            continue
+        for fname in os.listdir(base_dir):
+            if not fname.endswith((".safetensors", ".gguf")):
+                continue
+            fpath = os.path.join(base_dir, fname)
+            if fpath not in discovered:
+                info = MODEL_REGISTRY.get(fname)
+                if info and info.sha256:
+                    try:
+                        actual_hash = sha256sum(fpath)
+                        if actual_hash != info.sha256:
+                            print(f"[SeedVR2] ⚠️ Hash mismatch for {fname}, ignoring cached copy.")
+                            continue
+                    except Exception as err:
+                        print(f"[SeedVR2] ⚠️ Could not verify {fname}: {err}")
+                print(f"[SeedVR2] ✅ Found cached model at {fpath}")
+                discovered.append(fpath)
+    return discovered
+
+# --------------------------------------------------------------------
+# Existing public APIs (unchanged except patched call)
+# --------------------------------------------------------------------
 def get_default_models() -> List[str]:
-    """Get list of default models (non-VAE)"""
+    """Get list of default models (non-VAE)."""
     return [name for name, info in MODEL_REGISTRY.items() if info.category == "model"]
 
 def get_model_repo(model_name: str) -> str:
-    """Get repository for a specific model"""
+    """Get repository for a specific model."""
     return MODEL_REGISTRY.get(model_name, ModelInfo()).repo
 
 def get_available_models() -> List[str]:
-    """Get all available models including those discovered on disk"""
+    """Get all available models including those discovered on disk."""
     model_list = get_default_models()
-    
     try:
-        # Get all model files from all paths
-        model_files = get_all_model_files()
-        
-        # Add files not in registry
+        model_files = get_all_model_files_patched()  # <-- patched
         discovered_models = [
             filename for filename in model_files
-            if filename not in MODEL_REGISTRY
+            if os.path.basename(filename) not in MODEL_REGISTRY
         ]
-        
-        # Add discovered models to the list
         model_list.extend(sorted(discovered_models))
-    except:
-        pass
-    
+    except Exception as e:
+        print(f"[SeedVR2] ⚠️ Error getting available models: {e}")
     return model_list
