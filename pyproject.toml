@@ -29,7 +29,7 @@ Documentation = "https://github.com/shangeethAlex/skin-alex-02-comfy/wiki"
 "Bug Tracker" = "https://github.com/shangeethAlex/skin-alex-02-comfy/issues"
 
 [tool.comfy]
-PublisherId = ""
+PublisherId = "runpodskin-alex-v02"
 DisplayName = "skin-alex-02-comfy"
 Icon = ""
 includes = [] 
